@@ -52,7 +52,7 @@ function ldapcas_user($op, &$edit, &$account, $category = NULL)
 }
 
 /**
- * Updates the users ldap data and/or groups on login.
+ * Updates the user's ldap data on login.
  */
 function _ldapcas_user_login(&$user)
 {
