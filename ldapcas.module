@@ -28,7 +28,7 @@ function ldapcas_settings() {
   $form['sync']['ldapcas_everylogin'] = array(
      '#type' => 'radios',
      '#title' => t('Fetch LDAP user data upon CAS login'),
-     '#options' => array(0 => t('Only when account is created.'), 1 => t('Every time user logs in.')),
+     '#options' => array(0 => t('Only when an account is created.'), 1 => t('Every time a user logs in.')),
      '#default_value' => variable_get('ldapcas_everylogin', 0),
   );
 
