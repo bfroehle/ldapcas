@@ -18,24 +18,52 @@ function ldapcas_menu() {
 }
 
 function ldapcas_settings() {
-  $form['fetching'] = array(
+  $form['sync'] = array(
     '#type' => 'fieldset',
-    '#title' => t('Fetching options'),
+    '#title' => t('Synchronization options'),
     '#collapsible' => TRUE,
     '#collapsed' => FALSE,
   );
 
-  $form['fetching']['ldapcas_everylogin'] = array(
+  $form['sync']['ldapcas_everylogin'] = array(
      '#type' => 'radios',
      '#title' => t('Fetch LDAP user data upon CAS login'),
      '#options' => array(0 => t('Only when account is created.'), 1 => t('Every time user logs in.')),
      '#default_value' => variable_get('ldapcas_everylogin', 0),
   );
-  
+
   if( variable_get('cas_authmap',0) ) {
-    $form['fetching']['ldapcas_everylogin']['#description'] = '<div class="error">LDAP CAS is incompatible with the "Is Drupal also the CAS user repository?" option in ' . l(t("CAS settings"), "admin/user/cas") . '</div>';
+    $form['sync']['ldapcas_everylogin']['#description'] = '<div class="error">LDAP CAS is incompatible with the "Is Drupal also the CAS user repository?" option in ' . l(t("CAS settings"), "admin/user/cas") . '</div>';
   }
-  
+
+  $form['sync']['ldapcas_usedata'] = array(
+     '#type' => 'checkbox',
+     '#title' => t('Should we extract user data from an LDAP directory?'),
+     '#default_value' => variable_get('ldapcas_usedata', 0)
+  );
+  if ( module_exists("ldapdata") ) {
+    $form['sync']['ldapcas_usedata']['#description'] = t('Activate this option if you want to extract the user data from an LDAP directory.');
+  }
+  else {
+    $form['sync']['ldapcas_usedata']['#description'] = t('<strong>Please enable and configure LDAP Data module to use this option</strong>.');
+    $form['sync']['ldapcas_usedata']['#disabled'] = true;
+    $form['sync']['ldapcas_usedata']['#default_value'] = 0;
+  }
+
+  $form['sync']['ldapcas_usegroups'] = array(
+     '#type' => 'checkbox',
+     '#title' => t('Should we extract user groups from an LDAP directory?'),
+     '#default_value' => variable_get('ldapcas_usegroups', 0)
+  );
+  if ( module_exists("ldapgroups") ) {
+    $form['sync']['ldapcas_usegroups']['#description'] = t('Activate this option if you want to extract the user groups from an LDAP directory.' );
+  }
+  else {
+    $form['sync']['ldapcas_usegroups']['#description'] = t('<strong>Please enable and configure LDAP Groups module to use this option</strong>.');
+    $form['sync']['ldapcas_usegroups']['#disabled'] = true;
+    $form['sync']['ldapcas_usegroups']['#default_value'] = 0;
+  }
+
   return system_settings_form($form);
 }
 
@@ -61,54 +89,46 @@ function _ldapcas_user_login(&$user)
     return;
   }
 
-  $dofetch =  $_SESSION['cas_first_login'] || variable_get("ldapcas_everylogin",FALSE);
+  $ldapcas_sync = $_SESSION['cas_first_login'] || variable_get("ldapcas_everylogin",FALSE);
+  $ldapdata_sync = module_exists("ldapdata") && variable_get("ldapcas_usedata",FALSE);
+  $ldapgroups_sync = module_exists("ldapgroups") && variable_get("ldapcas_usegroups",FALSE);
+
+  if( !$ldapcas_sync || (!$ldapdata_sync && !$ldapgroups_sync) ) {
+    return;
+  }
 
   if ( module_exists("ldapauth") ) {
-    // Call init hook to execute neccessary includes and requires.
     module_invoke("ldapauth", "init");
   }
   else {
-    // LDAP auth module not installed or activated.
+    watchdog('ldapcas', t('Could not initialize LDAP Authentication module.'), array(), WATCHDOG_ERROR);
     return;
   }
-  
+
+  // Pretend that the user was authenticated by ldapauth.
+  // Otherwise calls to the ldap modules will return without any effect.
+  user_set_authmaps($user, array(
+    // Delete cas entry first, because there is a unique key on authname in authmap.
+    "authname_cas" => null,
+    "authname_ldapauth" => $user->name));
+
   _ldapcas_update_user($user);
-  
-  if ( module_exists("ldapdata") && $dofetch ) {
-   global $_ldapauth_ldap;
-    if ($entry = $_ldapauth_ldap->retrieveAttributes($user->ldap_dn)) {
-      watchdog('ldapcas', "Fetching user data for '%user'.", array('%user' => $user->ldap_dn));
-      $ldap_drupal_reverse_mappings = _ldapdata_reverse_mappings($user->ldap_config);
 
-      // Retrieve profile fields list.
-      $profile_fields = _ldapdata_retrieve_profile_fields();
-      $drupal_fields = array();
-      foreach ($ldap_drupal_reverse_mappings as $drupal_field => $ldap_attr) {
-        $value = isset($entry[strtolower($ldap_attr)]) ? $entry[strtolower($ldap_attr)][0] : '';
-
-        // Is it a profile field?
-        if (is_numeric($drupal_field)) {
-          if ($profile_field = isset($profile_fields[$drupal_field]) ? $profile_fields[$drupal_field] : NULL) {
-            if ($row = db_fetch_array(db_query("SELECT value FROM {profile_values} WHERE fid = '%d' AND uid = '%d'", $drupal_field, $user->uid))) {
-              if ($row['value'] != $value)
-                db_query("UPDATE {profile_values} SET value = '%s' WHERE fid = '%d' AND uid = '%d'", $value, $drupal_field, $user->uid);
-            }
-            else {
-              db_query("INSERT INTO {profile_values} (value, fid, uid) VALUES ('%s', '%d', '%d')", $value, $drupal_field, $user->uid);
-            }
-            $user->$drupal_field = $value;
-          }
-        }
-        // Then it might be a Drupal field.
-        else if (isset($user->$drupal_field) && !in_array($drupal_field, array('pass'))) {
-          $drupal_fields = array_merge($drupal_fields, array($drupal_field => $value));
-        }
-      }
-      if (!empty($drupal_fields))
-         $user = user_save($user, $drupal_fields);
-    }
-    $_ldapauth_ldap->disconnect();
+  if ( $ldapdata_sync ) {
+    // Call init hook otherwise additional config ldapdata.conf.php will not be loaded.
+    module_invoke("ldapdata", "init");
+    _ldapdata_user_load($user, TRUE);
   }
+
+  if ( $ldapgroups_sync ) {
+    module_invoke("ldapgroups", "init");
+    module_invoke("ldapgroups", "user_login", $user);
+  }
+
+  // Reset the authmap to cas authentication.
+  user_set_authmaps($user, array(
+    "authname_ldapauth" => null,
+    "authname_cas" => $user->name));
 }
 
 /**

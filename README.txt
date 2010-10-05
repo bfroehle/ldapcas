@@ -22,7 +22,7 @@ Installation:
 Install and enable the following modules:
  * cas
  * profile
- * ldapdata (part of ldap_integration)
+ * ldapdata or ldapgroups (part of ldap_integration)
  * ldapauth (part of ldap_integration)
  * ldapcas (this module)
 
