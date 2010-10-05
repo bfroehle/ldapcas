@@ -41,3 +41,8 @@ Debugging:
 Don't forget to install and activate the ldap module in php.  In Ubuntu:
     sudo apt-get install php5-ldap
     sudo /etc/init.d/apache2 restart
+
+Authors:
+--------
+* kassissieh (http://drupal.org/user/117382)
+* Bradley Froehle (brad.froehle@gmail.com)
