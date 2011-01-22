@@ -1,5 +1,3 @@
-; $Id$
-
 Drupal CAS + LDAP Integration
 =============================
 
